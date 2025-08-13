@@ -96,19 +96,30 @@ export default function SettingsModal({
         type: "names" | "words"
     ) => {
         const file = event.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const text = e.target?.result as string;
-                const items = text
-                    .split("\n")
-                    .map((line) => line.trim())
-                    .filter((line) => line);
-                handleSettingChange(type, items);
-            };
-            reader.readAsText(file);
-        }
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            let text = e.target?.result as string;
+            text = normalizeText(text);
+
+            const items = text
+                .split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line);
+
+            handleSettingChange(type, items);
+        };
+
+        reader.readAsText(file, "utf-8");
     };
+
+    const normalizeText = (str: string) =>
+        str
+            .replace(/\r\n/g, "\n")
+            .replace(/[“”]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/\uFFFD/g, "'");
 
     if (!isOpen) return null;
 
@@ -261,16 +272,25 @@ export default function SettingsModal({
                                 exit={{ opacity: 0, x: -20 }}
                                 className="space-y-6"
                             >
-                                <div>
+                                <div className="flex gap-2 mb-4">
                                     <Button
                                         onClick={() =>
                                             fileInputRef.current?.click()
                                         }
                                         variant="outline"
-                                        className="mb-4"
                                     >
                                         <Upload className="mr-2 h-4 w-4" />
                                         Upload CSV
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                        onClick={() =>
+                                            handleSettingChange("names", [])
+                                        }
+                                    >
+                                        Clear All
                                     </Button>
                                     <input
                                         ref={fileInputRef}
@@ -333,16 +353,25 @@ export default function SettingsModal({
                                 exit={{ opacity: 0, x: -20 }}
                                 className="space-y-6"
                             >
-                                <div>
+                                <div className="flex gap-2 mb-4">
                                     <Button
                                         onClick={() =>
                                             fileInputRef.current?.click()
                                         }
                                         variant="outline"
-                                        className="mb-4"
                                     >
                                         <Upload className="mr-2 h-4 w-4" />
                                         Upload CSV
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                        onClick={() =>
+                                            handleSettingChange("words", [])
+                                        }
+                                    >
+                                        Clear All
                                     </Button>
                                     <input
                                         ref={fileInputRef}

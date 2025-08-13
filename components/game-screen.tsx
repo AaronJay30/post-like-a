@@ -22,6 +22,8 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
     const [currentWord, setCurrentWord] = useState("");
     const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
     const [usedPlayers, setUsedPlayers] = useState<string[]>([]);
+    const [usedWordsGlobal, setUsedWordsGlobal] = useState<string[]>([]);
+    const [usedNamesGlobal, setUsedNamesGlobal] = useState<string[]>([]);
     const [gamePhase, setGamePhase] = useState<
         | "prompt"
         | "posing"
@@ -37,13 +39,22 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
     const [isSlotMachineRunning, setIsSlotMachineRunning] = useState(false);
     const [currentSlotName, setCurrentSlotName] = useState("");
     const [slotSelectionCount, setSlotSelectionCount] = useState(0);
+    const [rerollingPlayerIndex, setRerollingPlayerIndex] = useState<
+        number | null
+    >(null);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
     const explanationTimerRef = useRef<NodeJS.Timeout | null>(null);
     const slotRef = useRef<NodeJS.Timeout | null>(null);
+    const rerollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
-        startNewRound();
+        // Introduce a delay before starting the game
+        const delayBeforeStart = setTimeout(() => {
+            startNewRound();
+        }, 3000); // 3-second delay
+
         return () => {
+            clearTimeout(delayBeforeStart);
             if (timerRef.current) clearInterval(timerRef.current);
             if (explanationTimerRef.current)
                 clearInterval(explanationTimerRef.current);
@@ -58,14 +69,64 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
         setSlotSelectionCount(0);
         setCurrentExplanationIndex(0);
 
-        // Select random word
-        const randomWord =
-            settings.words[Math.floor(Math.random() * settings.words.length)];
-        setCurrentWord(randomWord);
+        // Start slot machine effect for word selection
+        setIsSlotMachineRunning(true);
+        const interval = setInterval(() => {
+            const randomWord =
+                settings.words[
+                    Math.floor(Math.random() * settings.words.length)
+                ];
+            setCurrentWord(randomWord);
+        }, 100);
+
+        const startRerollTimeout = () => {
+            if (rerollTimeoutRef.current) {
+                clearTimeout(rerollTimeoutRef.current);
+            }
+            rerollTimeoutRef.current = setTimeout(() => {
+                if (!isSlotMachineRunning) {
+                    startPosingPhase();
+                }
+            }, 5000); // Ensure 10-second delay
+        };
 
         setTimeout(() => {
-            startPosingPhase();
-        }, 2000);
+            clearInterval(interval);
+            setIsSlotMachineRunning(false);
+
+            // Select final word from available words (excluding globally used ones)
+            const availableWords = settings.words.filter(
+                (word) => !usedWordsGlobal.includes(word)
+            );
+            const finalWord =
+                availableWords.length > 0
+                    ? availableWords[
+                          Math.floor(Math.random() * availableWords.length)
+                      ]
+                    : settings.words[
+                          Math.floor(Math.random() * settings.words.length)
+                      ]; // Fallback if all used
+
+            setCurrentWord(finalWord);
+
+            // Add word to globally used words
+            if (!usedWordsGlobal.includes(finalWord)) {
+                setUsedWordsGlobal((prev) => [...prev, finalWord]);
+            }
+
+            // Start the initial reroll timeout
+            startRerollTimeout();
+
+            // Reset the delay if reroll is clicked
+            const resetRerollDelay = () => {
+                startRerollTimeout();
+            };
+
+            // Attach reset logic to reroll button
+            document
+                .getElementById("reroll-button")
+                ?.addEventListener("click", resetRerollDelay);
+        }, 5000); // Slot machine effect duration
     };
 
     const startPosingPhase = () => {
@@ -100,11 +161,13 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
     const runSlotMachine = () => {
         setIsSlotMachineRunning(true);
         const availableNames = settings.names.filter(
-            (name) => !usedPlayers.includes(name)
+            (name) =>
+                !usedPlayers.includes(name) && !usedNamesGlobal.includes(name)
         );
 
         if (availableNames.length === 0) {
-            // Reset if all names have been used
+            // Reset if all names have been used globally
+            setUsedNamesGlobal([]);
             setUsedPlayers([]);
             return runSlotMachine();
         }
@@ -139,6 +202,7 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
                 setCurrentSlotName(finalName);
                 setSelectedPlayers((prev) => [...prev, finalName]);
                 setUsedPlayers((prev) => [...prev, finalName]);
+                setUsedNamesGlobal((prev) => [...prev, finalName]);
 
                 // Use a simpler approach to handle next selection
                 setSlotSelectionCount((prev) => prev + 1);
@@ -225,10 +289,110 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
         }
     };
 
+    // Add reroll functionality for individual names
+    const rerollPlayerName = (index: number) => {
+        setRerollingPlayerIndex(index);
+        const availableNames = settings.names.filter(
+            (name) =>
+                !selectedPlayers.includes(name) &&
+                !usedNamesGlobal.includes(name)
+        );
+
+        if (availableNames.length === 0) {
+            // Reset if all names have been used globally
+            setUsedNamesGlobal([]);
+            return rerollPlayerName(index);
+        }
+
+        const newName =
+            availableNames[Math.floor(Math.random() * availableNames.length)];
+        const oldName = selectedPlayers[index];
+
+        // Remove old name from used lists
+        setUsedPlayers((prev) => prev.filter((name) => name !== oldName));
+        setUsedNamesGlobal((prev) => prev.filter((name) => name !== oldName));
+
+        // Update selected players with new name
+        setSelectedPlayers((prev) => {
+            const newPlayers = [...prev];
+            newPlayers[index] = newName;
+            return newPlayers;
+        });
+
+        // Add new name to used lists
+        setUsedPlayers((prev) => [...prev, newName]);
+        setUsedNamesGlobal((prev) => [...prev, newName]);
+
+        setTimeout(() => setRerollingPlayerIndex(null), 500);
+    };
+
+    const rerollAllPlayers = () => {
+        // Remove all selected players from used lists
+        selectedPlayers.forEach((player) => {
+            setUsedPlayers((prev) => prev.filter((name) => name !== player));
+            setUsedNamesGlobal((prev) =>
+                prev.filter((name) => name !== player)
+            );
+        });
+
+        // Clear selected players and restart selection
+        setSelectedPlayers([]);
+        setSlotSelectionCount(0);
+        setGamePhase("selection");
+        runSlotMachine();
+    };
+
     const getTimerColor = () => {
         if (timeLeft > settings.posingTimer * 0.5) return "text-green-400";
         if (timeLeft > settings.posingTimer * 0.25) return "text-yellow-400";
         return "text-red-400";
+    };
+
+    // Add slot machine effect for picking words
+    const startSlotMachineEffect = () => {
+        // Clear existing timeout first
+        if (rerollTimeoutRef.current) {
+            clearTimeout(rerollTimeoutRef.current);
+        }
+
+        setIsSlotMachineRunning(true);
+        const interval = setInterval(() => {
+            const randomWord =
+                settings.words[
+                    Math.floor(Math.random() * settings.words.length)
+                ];
+            setCurrentWord(randomWord);
+        }, 100);
+
+        setTimeout(() => {
+            clearInterval(interval);
+            setIsSlotMachineRunning(false);
+
+            // Select final word from available words (excluding globally used ones)
+            const availableWords = settings.words.filter(
+                (word) => !usedWordsGlobal.includes(word)
+            );
+            const finalWord =
+                availableWords.length > 0
+                    ? availableWords[
+                          Math.floor(Math.random() * availableWords.length)
+                      ]
+                    : settings.words[
+                          Math.floor(Math.random() * settings.words.length)
+                      ]; // Fallback if all used
+
+            setCurrentWord(finalWord);
+
+            // Add word to globally used words
+            if (!usedWordsGlobal.includes(finalWord)) {
+                setUsedWordsGlobal((prev) => [...prev, finalWord]);
+            }
+
+            // Start new 10-second timeout after reroll completes
+            rerollTimeoutRef.current = setTimeout(() => {
+                startPosingPhase();
+            }, 5000);
+        }, 2000); // Run for 2 seconds
     };
 
     return (
@@ -488,11 +652,43 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
                                         initial={{ opacity: 0, x: -50 }}
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ delay: index * 0.3 }}
-                                        className="bg-green-500/20 backdrop-blur-sm rounded-xl p-4 text-xl font-semibold"
+                                        className="bg-green-500/20 backdrop-blur-sm rounded-xl p-4 text-xl font-semibold flex items-center justify-between"
                                     >
-                                        ✓ {player}
+                                        <span
+                                            className={
+                                                rerollingPlayerIndex === index
+                                                    ? "opacity-50"
+                                                    : ""
+                                            }
+                                        >
+                                            ✓ {player}
+                                        </span>
+                                        <Button
+                                            onClick={() =>
+                                                rerollPlayerName(index)
+                                            }
+                                            disabled={
+                                                rerollingPlayerIndex !== null
+                                            }
+                                            size="sm"
+                                            className="bg-blue-500 hover:bg-blue-600 text-white ml-4"
+                                        >
+                                            {rerollingPlayerIndex === index
+                                                ? "Rolling..."
+                                                : "Reroll"}
+                                        </Button>
                                     </motion.div>
                                 ))}
+
+                                <div className="flex gap-4 justify-center mt-6">
+                                    <Button
+                                        onClick={rerollAllPlayers}
+                                        disabled={rerollingPlayerIndex !== null}
+                                        className="bg-orange-500 hover:bg-orange-600 text-white z-10"
+                                    >
+                                        Reroll All Players
+                                    </Button>
+                                </div>
                             </div>
 
                             <p className="text-xl text-gray-300 mb-8">
@@ -669,6 +865,19 @@ export default function GameScreen({ settings, onEndGame }: GameScreenProps) {
                         </motion.div>
                     )}
                 </AnimatePresence>
+
+                {/* Add a button to reroll the current word */}
+                {gamePhase === "prompt" &&
+                    !isSlotMachineRunning &&
+                    currentWord && (
+                        <Button
+                            onClick={startSlotMachineEffect}
+                            style={{ zIndex: 10 }}
+                            className="mt-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold px-6 py-3 rounded-full text-lg transition-all duration-200"
+                        >
+                            Reroll Word
+                        </Button>
+                    )}
             </div>
         </div>
     );
